@@ -1,0 +1,662 @@
+# Wave 2 of 4: objects originally created at 2026-11-08T20:38:35Z.
+# ./demo.sh up applies waves in order, one second apart, to keep the original creation order.
+apiVersion: v1
+kind: Service
+metadata:
+  name: ghost
+  namespace: broken
+spec:
+  internalTrafficPolicy: Cluster
+  ipFamilies:
+    - IPv4
+  ipFamilyPolicy: SingleStack
+  ports:
+    - name: http
+      port: 8000
+      protocol: TCP
+      targetPort: 8080
+  selector:
+    app: does-not-exist
+  sessionAffinity: None
+  type: ClusterIP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: never-ready
+  namespace: broken
+spec:
+  internalTrafficPolicy: Cluster
+  ipFamilies:
+    - IPv4
+  ipFamilyPolicy: SingleStack
+  ports:
+    - name: http
+      port: 8000
+      protocol: TCP
+      targetPort: 8080
+  selector:
+    app: never-ready
+  sessionAffinity: None
+  type: ClusterIP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: never-ready
+  namespace: broken
+spec:
+  progressDeadlineSeconds: 600
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: never-ready
+  strategy:
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: never-ready
+    spec:
+      containers:
+        - image: mccutchen/go-httpbin:v2.15.0
+          imagePullPolicy: IfNotPresent
+          name: app
+          ports:
+            - containerPort: 8080
+              protocol: TCP
+          readinessProbe:
+            failureThreshold: 3
+            httpGet:
+              path: /status/503
+              port: 8080
+              scheme: HTTP
+            periodSeconds: 5
+            successThreshold: 1
+            timeoutSeconds: 1
+          resources: {}
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext: {}
+      terminationGracePeriodSeconds: 30
+---
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: GatewayParameters
+metadata:
+  name: bad-image
+  namespace: broken
+spec:
+  kube:
+    envoyContainer:
+      image:
+        registry: cr.kgateway.dev/kgateway-dev
+        repository: envoy-wrapper
+        tag: does-not-exist
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: broken-proxy
+  namespace: broken
+spec:
+  gatewayClassName: kgateway
+  infrastructure:
+    parametersRef:
+      group: gateway.kgateway.dev
+      kind: GatewayParameters
+      name: bad-image
+  listeners:
+    - allowedRoutes:
+        namespaces:
+          from: Same
+      name: http
+      port: 8080
+      protocol: HTTP
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: ListenerSet
+metadata:
+  name: proto-clash
+  namespace: broken
+spec:
+  listeners:
+    - allowedRoutes:
+        namespaces:
+          from: Same
+      name: tcp
+      port: 8080
+      protocol: TCP
+  parentRef:
+    group: gateway.networking.k8s.io
+    kind: Gateway
+    name: http
+    namespace: kgateway-system
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: ListenerSet
+metadata:
+  name: tls-missing-cert
+  namespace: broken
+spec:
+  listeners:
+    - allowedRoutes:
+        namespaces:
+          from: Same
+      hostname: secure.example.com
+      name: https
+      port: 8443
+      protocol: HTTPS
+      tls:
+        certificateRefs:
+          - group: ""
+            kind: Secret
+            name: no-such-cert
+        mode: Terminate
+  parentRef:
+    group: gateway.networking.k8s.io
+    kind: Gateway
+    name: http
+    namespace: kgateway-system
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: bad-regex
+  namespace: broken
+spec:
+  hostnames:
+    - regex.example.com
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: nack-demo
+  rules:
+    - backendRefs:
+        - group: ""
+          kind: Service
+          name: ghost
+          port: 8000
+          weight: 1
+      matches:
+        - path:
+            type: RegularExpression
+            value: /items/([
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: missing-backend
+  namespace: broken
+spec:
+  hostnames:
+    - missing.example.com
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: http
+      namespace: kgateway-system
+  rules:
+    - backendRefs:
+        - group: ""
+          kind: Service
+          name: no-such-svc
+          port: 8000
+          weight: 1
+      matches:
+        - path:
+            type: PathPrefix
+            value: /
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: no-endpoints
+  namespace: broken
+spec:
+  hostnames:
+    - empty.example.com
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: http
+      namespace: kgateway-system
+  rules:
+    - backendRefs:
+        - group: ""
+          kind: Service
+          name: ghost
+          port: 8000
+          weight: 1
+      matches:
+        - path:
+            type: PathPrefix
+            value: /ghost
+    - backendRefs:
+        - group: ""
+          kind: Service
+          name: never-ready
+          port: 8000
+          weight: 1
+      matches:
+        - path:
+            type: PathPrefix
+            value: /
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: no-refgrant
+  namespace: broken
+spec:
+  hostnames:
+    - steal.example.com
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: http
+      namespace: kgateway-system
+  rules:
+    - backendRefs:
+        - group: ""
+          kind: Service
+          name: httpbin
+          namespace: httpbin
+          port: 8000
+          weight: 1
+      matches:
+        - path:
+            type: PathPrefix
+            value: /
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: orphan
+  namespace: broken
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: does-not-exist
+      namespace: kgateway-system
+  rules:
+    - backendRefs:
+        - group: ""
+          kind: Service
+          name: ghost
+          port: 8000
+          weight: 1
+      matches:
+        - path:
+            type: PathPrefix
+            value: /
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: wrong-listener
+  namespace: broken
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: http
+      namespace: kgateway-system
+      sectionName: https
+  rules:
+    - backendRefs:
+        - group: ""
+          kind: Service
+          name: ghost
+          port: 8000
+          weight: 1
+      matches:
+        - path:
+            type: PathPrefix
+            value: /
+---
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: TrafficPolicy
+metadata:
+  name: dangling-policy
+  namespace: broken
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: deleted-route
+  timeouts:
+    request: 5s
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: api-parent
+  namespace: httpbin
+spec:
+  hostnames:
+    - api.example.com
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: http
+      namespace: kgateway-system
+  rules:
+    - backendRefs:
+        - group: gateway.networking.k8s.io
+          kind: HTTPRoute
+          name: '*'
+          namespace: team-b
+          weight: 1
+      matches:
+        - path:
+            type: PathPrefix
+            value: /api
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: echo
+  namespace: team-a
+spec:
+  internalTrafficPolicy: Cluster
+  ipFamilies:
+    - IPv4
+  ipFamilyPolicy: SingleStack
+  ports:
+    - name: http
+      port: 8000
+      protocol: TCP
+      targetPort: 8080
+  selector:
+    app: echo
+  sessionAffinity: None
+  type: ClusterIP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: echo
+  namespace: team-a
+spec:
+  progressDeadlineSeconds: 600
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: echo
+  strategy:
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: echo
+    spec:
+      containers:
+        - image: mccutchen/go-httpbin:v2.15.0
+          imagePullPolicy: IfNotPresent
+          name: echo
+          ports:
+            - containerPort: 8080
+              protocol: TCP
+          resources: {}
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext: {}
+      terminationGracePeriodSeconds: 30
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: ListenerSet
+metadata:
+  name: team-a
+  namespace: team-a
+spec:
+  listeners:
+    - allowedRoutes:
+        namespaces:
+          from: Same
+      hostname: a.example.com
+      name: team-a
+      port: 8080
+      protocol: HTTP
+  parentRef:
+    group: gateway.networking.k8s.io
+    kind: Gateway
+    name: http
+    namespace: kgateway-system
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: ReferenceGrant
+metadata:
+  name: allow-team-b
+  namespace: team-a
+spec:
+  from:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      namespace: team-b
+  to:
+    - group: ""
+      kind: Service
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: team-a-app
+  namespace: team-a
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: ListenerSet
+      name: team-a
+  rules:
+    - backendRefs:
+        - group: ""
+          kind: Service
+          name: echo
+          port: 8000
+          weight: 1
+      filters:
+        - type: URLRewrite
+          urlRewrite:
+            path:
+              replacePrefixMatch: /anything/v1
+              type: ReplacePrefixMatch
+      matches:
+        - path:
+            type: PathPrefix
+            value: /v1
+    - backendRefs:
+        - group: ""
+          kind: Service
+          name: echo
+          port: 8000
+          weight: 1
+      filters:
+        - requestHeaderModifier:
+            add:
+              - name: x-route
+                value: canary
+          type: RequestHeaderModifier
+      matches:
+        - headers:
+            - name: x-canary
+              type: Exact
+              value: "true"
+          path:
+            type: PathPrefix
+            value: /
+---
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: TrafficPolicy
+metadata:
+  name: team-a-timeouts
+  namespace: team-a
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: team-a-app
+  timeouts:
+    request: 10s
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: echo
+  namespace: team-b
+spec:
+  internalTrafficPolicy: Cluster
+  ipFamilies:
+    - IPv4
+  ipFamilyPolicy: SingleStack
+  ports:
+    - name: http
+      port: 8000
+      protocol: TCP
+      targetPort: 8080
+  selector:
+    app: echo
+  sessionAffinity: None
+  type: ClusterIP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: echo
+  namespace: team-b
+spec:
+  progressDeadlineSeconds: 600
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: echo
+  strategy:
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: echo
+    spec:
+      containers:
+        - image: mccutchen/go-httpbin:v2.15.0
+          imagePullPolicy: IfNotPresent
+          name: echo
+          ports:
+            - containerPort: 8080
+              protocol: TCP
+          resources: {}
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext: {}
+      terminationGracePeriodSeconds: 30
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: ListenerSet
+metadata:
+  name: team-b
+  namespace: team-b
+spec:
+  listeners:
+    - allowedRoutes:
+        namespaces:
+          from: Same
+      hostname: b.example.com
+      name: team-b
+      port: 8080
+      protocol: HTTP
+  parentRef:
+    group: gateway.networking.k8s.io
+    kind: Gateway
+    name: http
+    namespace: kgateway-system
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: api-misfit
+  namespace: team-b
+spec:
+  rules:
+    - backendRefs:
+        - group: ""
+          kind: Service
+          name: echo
+          port: 8000
+          weight: 1
+      matches:
+        - path:
+            type: PathPrefix
+            value: /shop
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: api-orders
+  namespace: team-b
+spec:
+  rules:
+    - backendRefs:
+        - group: ""
+          kind: Service
+          name: echo
+          port: 8000
+          weight: 1
+      filters:
+        - type: URLRewrite
+          urlRewrite:
+            path:
+              replacePrefixMatch: /anything/orders
+              type: ReplacePrefixMatch
+      matches:
+        - path:
+            type: PathPrefix
+            value: /api/orders
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: team-b-app
+  namespace: team-b
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: ListenerSet
+      name: team-b
+  rules:
+    - backendRefs:
+        - group: ""
+          kind: Service
+          name: echo
+          port: 8000
+          weight: 90
+        - group: ""
+          kind: Service
+          name: echo
+          namespace: team-a
+          port: 8000
+          weight: 10
+      matches:
+        - path:
+            type: PathPrefix
+            value: /

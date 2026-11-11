@@ -1,0 +1,21 @@
+# Wave 3 of 4: objects originally created at 2026-11-08T20:38:46Z.
+# ./demo.sh up applies waves in order, one second apart, to keep the original creation order.
+apiVersion: gateway.networking.k8s.io/v1
+kind: ListenerSet
+metadata:
+  name: clash
+  namespace: broken
+spec:
+  listeners:
+    - allowedRoutes:
+        namespaces:
+          from: Same
+      hostname: a.example.com
+      name: clash
+      port: 8080
+      protocol: HTTP
+  parentRef:
+    group: gateway.networking.k8s.io
+    kind: Gateway
+    name: http
+    namespace: kgateway-system

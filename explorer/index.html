@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>kgateway Traffic Explorer</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="vendor/flowstory/style.css">
+  <style>
+    :root {
+      --fs-yaml-key:#79c0ff; --fs-yaml-string:#a5d6ff; --fs-yaml-kind:#d2a8ff;
+      --fs-yaml-literal:#f0883e; --fs-yaml-comment:#8b949e;
+    }
+    body.light {
+      --fs-yaml-key:#0550ae; --fs-yaml-string:#0a3069; --fs-yaml-kind:#6639ba;
+      --fs-yaml-literal:#953800; --fs-yaml-comment:#57606a;
+    }
+    body { background: var(--fs-bg); }
+    #fs-canvas { position: fixed; top: 0; left: 0; z-index: 0; display: block; }
+    .fs-brand { font: 700 18px system-ui; color: var(--fs-text-bright); gap: 8px; }
+    .fs-brand { display: flex; align-items: center; }
+    .fs-brand small { font-weight: 400; color: var(--fs-text-dim); font-size: 12px; }
+    .kgw-logo { height: 30px; width: auto; display: block; }
+    .kgw-logo-light { display: none; }
+    body.light .kgw-logo-dark { display: none; }
+    body.light .kgw-logo-light { display: block; }
+    .fs-panel { overflow-y: auto; }
+    .kgw-section { padding: 10px 14px; border-bottom: 1px solid var(--fs-border); font: 13px system-ui; color: var(--fs-text); }
+    .kgw-section h3 { margin: 0 0 8px; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--fs-text-dim); }
+    .kgw-row { display: flex; gap: 6px; margin-bottom: 6px; align-items: center; }
+    .kgw-row > * { min-width: 0; }
+    .kgw-panel select, .kgw-panel input, .kgw-panel textarea, .kgw-panel button {
+      background: var(--fs-bg); color: var(--fs-text); border: 1px solid var(--fs-border);
+      border-radius: 6px; padding: 6px 8px; font: 12px SFMono-Regular, Consolas, monospace;
+    }
+    .kgw-panel button { cursor: pointer; font-family: system-ui; }
+    .kgw-panel button.primary { border-color: var(--fs-accent); color: var(--fs-accent); font-weight: 600; }
+    .kgw-panel textarea { width: 100%; box-sizing: border-box; resize: vertical; min-height: 44px; }
+    .grow { flex: 1; }
+    .kgw-lbl { width: 36px; flex: 0 0 36px; font-size: 11px; color: var(--fs-text-dim); }
+    .kgw-row[hidden], .kgw-panel input[hidden] { display: none; }
+    #kgw-status { font-size: 12px; color: var(--fs-text-dim); white-space: pre-wrap; }
+    #kgw-status.err { color: var(--fs-error); }
+    #kgw-verdict { margin-top: 6px; font-size: 12px; white-space: pre-wrap; }
+    #kgw-verdict.ok { color: var(--fs-success); }
+    #kgw-verdict.bad { color: var(--fs-error); }
+    #fs-panel-content .fs-steps { max-height: 34vh; overflow-y: auto; }
+    #fs-highlight-box { z-index: 250 !important; }
+    #fs-overlay { z-index: 300 !important; }
+    #fs-overlay-card {
+      width: min(860px, calc(100vw - 420px)); max-width: none !important;
+      max-height: calc(100vh - 20px); overflow: auto; box-sizing: border-box;
+      background: var(--fs-bg-surface) !important; border-color: var(--fs-border) !important;
+      box-shadow: 0 12px 40px rgba(0,0,0,.35) !important; color: var(--fs-text);
+    }
+    #fs-overlay-desc, #fs-overlay-close { color: var(--fs-text-dim) !important; }
+    #fs-overlay-details > div span:first-child { color: var(--fs-text-dim) !important; }
+    #fs-overlay-details > div span:nth-child(2) { color: var(--fs-text) !important; }
+    .fs-yaml {
+      margin: 14px 0 0; padding: 16px; max-height: 56vh; overflow: auto;
+      border: 1px solid var(--fs-border); border-radius: 6px;
+      background: var(--fs-bg); color: var(--fs-text);
+      font: 13px/1.5 SFMono-Regular, Consolas, monospace; white-space: pre;
+    }
+    .fs-yaml-key { color: var(--fs-yaml-key); font-weight: 600; }
+    .fs-yaml-string { color: var(--fs-yaml-string); }
+    .fs-yaml-kind { color: var(--fs-yaml-kind); font-weight: 600; }
+    .fs-yaml-literal { color: var(--fs-yaml-literal); font-weight: 600; }
+    .fs-yaml-comment, .fs-yaml-punctuation { color: var(--fs-yaml-comment); }
+    .kgw-copy { margin-top: 10px; }
+    #kgw-empty {
+      position: fixed; inset: 0 380px 0 0; display: none; align-items: center; justify-content: center;
+      font: 14px/1.6 system-ui; color: var(--fs-text-dim); text-align: center; padding: 24px; z-index: 1;
+    }
+    #kgw-empty code { background: var(--fs-bg-surface); padding: 2px 6px; border-radius: 4px; }
+    @media (max-width: 760px) {
+      .fs-panel { width: 100vw; height: 50vh; top: auto; bottom: 0; }
+      #kgw-empty { inset: 0 0 50vh 0; }
+    }
+  </style>
+</head>
+<body>
+  <button class="fs-theme-toggle" id="fs-theme" type="button" aria-label="Toggle theme">&#9790;</button>
+  <div class="fs-brand" id="fs-brand">
+    <img class="kgw-logo kgw-logo-dark" src="images/logo-dark.svg" alt="kgateway">
+    <img class="kgw-logo kgw-logo-light" src="images/logo.svg" alt="kgateway">
+    <small>traffic explorer</small>
+  </div>
+  <div class="fs-title" id="fs-title"></div>
+  <aside class="fs-panel kgw-panel" aria-label="Controls and details">
+    <div class="kgw-section">
+      <h3>Gateway</h3>
+      <div class="kgw-row">
+        <select id="kgw-gateway" class="grow" aria-label="Gateway"></select>
+        <button id="kgw-refresh" type="button" title="Re-read the cluster">&#8635; Refresh</button>
+      </div>
+      <div id="kgw-status">Loading cluster data...</div>
+    </div>
+    <div class="kgw-section">
+      <h3>Trace a request</h3>
+      <div class="kgw-row">
+        <label class="kgw-lbl" for="kgw-port-sel">Port</label>
+        <select id="kgw-port-sel" class="grow" aria-label="Port"></select>
+        <input id="kgw-port" type="number" style="width:80px" placeholder="port" aria-label="Custom port" hidden>
+        <select id="kgw-scheme" aria-label="Scheme"><option>http</option><option>https</option></select>
+      </div>
+      <div class="kgw-row">
+        <label class="kgw-lbl" for="kgw-host-sel">Host</label>
+        <select id="kgw-host-sel" class="grow" aria-label="Host"></select>
+      </div>
+      <div class="kgw-row" id="kgw-host-row" hidden>
+        <label class="kgw-lbl"></label>
+        <input id="kgw-host" class="grow" placeholder="custom host" aria-label="Custom host">
+      </div>
+      <div class="kgw-row">
+        <label class="kgw-lbl" for="kgw-path-sel">Path</label>
+        <select id="kgw-path-sel" class="grow" aria-label="Path"></select>
+      </div>
+      <div class="kgw-row" id="kgw-path-row" hidden>
+        <label class="kgw-lbl"></label>
+        <select id="kgw-method" aria-label="Method">
+          <option>GET</option><option>POST</option><option>PUT</option><option>PATCH</option><option>DELETE</option><option>HEAD</option><option>OPTIONS</option>
+        </select>
+        <input id="kgw-path" class="grow" value="/" placeholder="/path?query" aria-label="Custom path">
+      </div>
+      <textarea id="kgw-headers" placeholder="extra headers, one per line&#10;x-user: alice" aria-label="Headers"></textarea>
+      <div class="kgw-row" style="margin-top:6px">
+        <button id="kgw-trace" class="primary grow" type="button">&#9654; Trace</button>
+        <select id="kgw-loop" aria-label="Loop through all paths" title="Cycle through every route path of this Gateway, waiting after each trace">
+          <option value="0">Loop off</option><option value="5">Loop 5s</option><option value="10" selected>Loop 10s</option>
+        </select>
+        <select id="fs-speed" aria-label="Playback speed"><option value="1" selected>1&times;</option><option value="2">2&times;</option><option value="4">4&times;</option></select>
+        <button id="fs-reset" type="button">Reset</button>
+      </div>
+      <div id="kgw-verdict"></div>
+    </div>
+    <div id="fs-panel-content"></div>
+  </aside>
+  <div id="kgw-empty"></div>
+  <div id="fs-canvas-host"></div>
+  <div class="fs-legend" id="fs-legend"></div>
+  <div id="fs-overlay-host"></div>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

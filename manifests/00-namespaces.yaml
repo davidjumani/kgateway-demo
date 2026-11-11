@@ -1,0 +1,33 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: broken
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: httpbin
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: team-a
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: team-b
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  labels:
+    name: kgateway-system
+  name: kgateway-system
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  labels:
+    name: snellius
+  name: snellius

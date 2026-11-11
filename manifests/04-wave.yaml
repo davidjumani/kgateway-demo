@@ -1,0 +1,16 @@
+# Wave 4 of 4: objects originally created at 2026-11-08T20:39:10Z.
+# ./demo.sh up applies waves in order, one second apart, to keep the original creation order.
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: nack-demo
+  namespace: broken
+spec:
+  gatewayClassName: kgateway
+  listeners:
+    - allowedRoutes:
+        namespaces:
+          from: Same
+      name: http
+      port: 8080
+      protocol: HTTP

@@ -1,0 +1,6 @@
+# Single-node kind cluster, same shape as the original kgw-demo cluster.
+# The node image is set by demo.sh from versions.env (KIND_NODE_IMAGE).
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane
